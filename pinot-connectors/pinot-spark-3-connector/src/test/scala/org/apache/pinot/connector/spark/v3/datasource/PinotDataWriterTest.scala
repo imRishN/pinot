@@ -149,9 +149,10 @@ class PinotDataWriterTest extends AnyFunSuite with Matchers with BeforeAndAfter 
       writeSchema, writeOptions.tableName, writeOptions.timeColumnName,
       writeOptions.timeFormat, writeOptions.timeGranularity)
     val writer = new PinotDataWriter[InternalRow](0, 0, writeOptions, writeSchema, pinotSchema)
-    val record1 = new TestInternalRow(Array[Any]("Alice", 30, 1234567890L, "Alice".getBytes))
+    // Names are written out of order so `name` is not sorted: Pinot skips the inverted index for sorted columns
+    val record1 = new TestInternalRow(Array[Any]("Bob", 25, 1234567890L, "Bob".getBytes))
     writer.write(record1)
-    val record2 = new TestInternalRow(Array[Any]("Bob", 25, 1234567891L, "Bob".getBytes))
+    val record2 = new TestInternalRow(Array[Any]("Alice", 30, 1234567891L, "Alice".getBytes))
     writer.write(record2)
 
     val commitMessage: WriterCommitMessage = writer.commit()
@@ -174,7 +175,12 @@ class PinotDataWriterTest extends AnyFunSuite with Matchers with BeforeAndAfter 
     segmentFiles should contain (untarDir + "/index_map")
     segmentFiles should contain (untarDir + "/metadata.properties")
     segmentFiles should contain (untarDir + "/columns.psf")
-    segmentFiles should contain (untarDir + "/name.bitmap.inv")
+
+    // Pinot 1.3 packs all indexes into columns.psf, so check the index map for the inverted index
+    val indexMapSrc = Source.fromFile(untarDir + "/index_map")
+    val indexMapContent = indexMapSrc.getLines.mkString("\n")
+    indexMapSrc.close()
+    indexMapContent should include ("name.inverted_index.startOffset")
 
     // Verify basic metadata content
     val metadataSrc = Source.fromFile(untarDir + "/metadata.properties")
